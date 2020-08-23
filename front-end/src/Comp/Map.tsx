@@ -38,7 +38,6 @@ type InteractionState<T extends InteractionMode> = {
     active: boolean;
     data: {
         current?: Array<[number, number]>;
-        groups?: Array<HilbertNode>;
     };
 };
 
@@ -58,6 +57,9 @@ export class Map extends Component<MapProps, MapState, {}> {
     protected updated: boolean;
 
     protected interactionState: InteractionState<InteractionMode>;
+    protected nodes: Array<HilbertNode>;
+    protected nodeR: number;
+    protected nodeMax: number;
 
     public constructor(props: MapProps) {
         super(props);
@@ -82,6 +84,10 @@ export class Map extends Component<MapProps, MapState, {}> {
             active: false,
             data: {}
         };
+
+        this.nodes = [];
+        this.nodeR = NaN;
+        this.nodeMax = NaN;
     }
 
     public render(): JSX.Element {
@@ -89,20 +95,27 @@ export class Map extends Component<MapProps, MapState, {}> {
             <div>
                 <div key="tools" style={{
                     display: "flex",
-                    width: this.props.width,
-                    border: "rgb(28,28,28)",
-                    padding: "6px 8px",
-                    textAlign: "left"
+                    width: this.props.width - 18,
+                    border: "1px solid rgb(28,28,28)",
+                    padding: "5.5px 8px 6.5px",
+                    textAlign: "left",
+                    backgroundColor: "rgb(250,246,248)",
+                    fontSize: "14px",
+                    letterSpacing: "-0.2px"
                 }} >
-                    <label key="modeSwitch_label" style={{
+                    <label key="refresh" title="refresh" style={{
                         display: "inline-block",
-                        height: "18px",
-                        padding: "3px 6px 1px",
-                        textAlign: "center"
-                    }}  >
-                        { "Display mode:" }
-                    </label>
-                    <label key="modeSwitch" style={{
+                        width: "10px",
+                        height: "23px",
+                        boxShadow: "2px 2px 2px #00000060",
+                        border: "1px solid #ddd",
+                        cursor: "pointer"
+                    }} onClick={
+                        () => {
+                            this.repaint();
+                        }
+                    } />
+                    <label key="modeSwitch" title="display mode" style={{
                         display: "inline-block",
                         width: "64px",
                         height: "18px",
@@ -126,15 +139,39 @@ export class Map extends Component<MapProps, MapState, {}> {
                     } >
                         { this.state.mode }
                     </label>
-                    <img key="sketch" alt="sketch"
-                    src={ `/images/sketch${ this.interactionState.type === "sketch" ? "_active" : "" }.jpg` }
-                    width="23px" height="23px" style={{
-                        marginLeft: "8px",
+                    <label key="rebuild" title="rebuild Hilbert tree" style={{
+                        display: "inline-block",
+                        width: "64px",
+                        height: "18px",
+                        padding: "3.5px 4px 1.5px",
                         boxShadow: "2px 2px 2px #00000060",
+                        textAlign: "center",
                         border: "1px solid #ddd",
-                        cursor: "pointer"
+                        cursor: "pointer",
+                        opacity: this.state.mode === "node" ? 1 : 0.4
                     }} onClick={
                         () => {
+                            if (this.state.mode !== "node") {
+                                return;
+                            }
+                            this.rebuildTree();
+                        }
+                    } >
+                        { "rebuild" }
+                    </label>
+                    <img key="sketch" alt="sketch"
+                    src={ `/images/sketch${ this.interactionState.type === "sketch" ? "_active" : "" }.jpg` }
+                    width="23px" height="21px" style={{
+                        boxShadow: "2px 2px 2px #00000060",
+                        border: "1px solid #ddd",
+                        padding: "1px",
+                        cursor: "pointer",
+                        opacity: this.state.mode === "node" ? 1 : 0.4
+                    }} onClick={
+                        () => {
+                            if (this.state.mode !== "node") {
+                                return;
+                            }
                             if (this.interactionState.type === "sketch") {
                                 this.setInteractionMode("map");
                             } else {
@@ -146,7 +183,8 @@ export class Map extends Component<MapProps, MapState, {}> {
                 <div key="mapbox-container" id={ this.props.id } style={{
                     display: "block",
                     width: this.props.width,
-                    height: this.props.height
+                    height: this.props.height,
+                    backgroundColor: "rgb(27,27,27)"
                 }} >
                     <MapBox ref={ this.map } containerID={ this.props.id }
                     accessToken="pk.eyJ1IjoiaWNoZW4tYW50b2luZSIsImEiOiJjazF5bDh5eWUwZ2tiM2NsaXQ3bnFvNGJ1In0.sFDwirFIqR4UEjFQoKB8uA"
@@ -189,10 +227,7 @@ export class Map extends Component<MapProps, MapState, {}> {
                             this.interactionState.data = {
                                 current: [
                                     [e.clientX, e.clientY - 36.6]
-                                ],
-                                groups: this.interactionState.data?.groups || (
-                                    getHilbertLeaves(this.state.data, 10 + this.map.current!.getZoom() * 2).map(d => d)
-                                )
+                                ]
                             };
                         }
                     }
@@ -279,6 +314,32 @@ export class Map extends Component<MapProps, MapState, {}> {
         }
     }
 
+    /**
+     * 调用这个方法来基于地图缩放级重置树结构.
+     *
+     * @protected
+     * @memberof Map
+     */
+    protected rebuildTree(): void {
+        if (this.map.current) {
+            this.nodeR = NaN;
+            this.nodeMax = NaN;
+            this.nodes = getHilbertLeaves(this.state.data, 10 + this.map.current.getZoom() * 2);
+            this.repaint();
+        }
+    }
+
+    /**
+     * 加载未编码的 geodata 数据.
+     *
+     * @param {Array<{
+     *         id: number;
+     *         lng: number;
+     *         lat: number;
+     *         value: number;
+     *     }>} data 缺少编码的 geodata 数据
+     * @memberof Map
+     */
     public load(data: Array<{
         id: number;
         lng: number;
@@ -297,6 +358,14 @@ export class Map extends Component<MapProps, MapState, {}> {
         });
     }
 
+    /**
+     * 显示正在进行的手绘操作.
+     * 当操作结束时，更新树结构.
+     *
+     * @protected
+     * @returns {void}
+     * @memberof Map
+     */
     protected drawSketch(): void {
         if (!this.ctxSketch || this.interactionState.data?.current!.length < 2) return;
 
@@ -327,10 +396,9 @@ export class Map extends Component<MapProps, MapState, {}> {
                 setTimeout(() => {
                     // 检查框选中的点
                     let curPoints: Array<HilbertNode> = [];
-                    const group: Array<HilbertNode> = this.interactionState.data.groups!;
                     let nextGroup: Array<HilbertNode> = [];
                     
-                    group.forEach(d => {
+                    this.nodes.forEach(d => {
                         const { lng, lat } = HilbertDecode(d.code);
                         const p: { x: number; y: number; } = this.map.current!.project([lng, lat]);
                         if (
@@ -353,7 +421,7 @@ export class Map extends Component<MapProps, MapState, {}> {
                     });
         
                     if (curPoints.length) {
-                        this.interactionState.data.groups = nextGroup.map(d => d);
+                        this.nodes = nextGroup.map(d => d);
 
                         let curNode: HilbertNode = {
                             code: "",
@@ -365,25 +433,26 @@ export class Map extends Component<MapProps, MapState, {}> {
                         let y: number = 0;
 
                         curPoints.forEach(d => {
-                            const { lng, lat } = HilbertDecode(d.code);
-                            x += lng;
-                            y += lat;
+                            d.points.forEach(p => {
+                                x += p.lng;
+                                y += p.lat;
+                            });
                             curNode.points.push(...d.points);
                             curNode.childrens += d.childrens;
                         });
 
-                        x /= curPoints.length;
-                        y /= curPoints.length;
+                        x /= curNode.points.length;
+                        y /= curNode.points.length;
 
                         curNode.code = HilbertEncode(x, y, 16);
 
-                        this.interactionState.data.groups = [curNode, ...this.interactionState.data.groups];
+                        this.nodes = [curNode, ...this.nodes];
         
                         this.ctxScatter!.clearRect(0, 0, this.props.width, this.props.height);
                         this.ctxSketch!.clearRect(0, 0, this.props.width, this.props.height);
                         // 绘制结点
                         this.updated = true;
-                        this.paintNodes(this.interactionState.data.groups);
+                        this.paintNodes();
                     }
                 }, 100);
             }
@@ -395,6 +464,7 @@ export class Map extends Component<MapProps, MapState, {}> {
     }
 
     public componentDidUpdate(): void {
+        this.rebuildTree();
         this.repaint();
     }
 
@@ -406,6 +476,15 @@ export class Map extends Component<MapProps, MapState, {}> {
         this.timers = [];
     }
 
+    /**
+     * 绘制散点.
+     *
+     * @protected
+     * @param {Array<{x: number; y:number; val: number;}>} list
+     * @param {number} [step=100]
+     * @returns {void}
+     * @memberof Map
+     */
     protected bufferPaintScatters(list: Array<{x: number; y:number; val: number;}>, step: number = 100): void {
         this.clearTimers();
 
@@ -457,7 +536,14 @@ export class Map extends Component<MapProps, MapState, {}> {
 
         this.progress.current?.start(this.timers.length);
     }
-
+    
+    /**
+     * 重绘数据，内部封装绘制模式的分支.
+     *
+     * @param {boolean} [waiting=true]
+     * @returns {void}
+     * @memberof Map
+     */
     public repaint(waiting: boolean = true): void {
         if (waiting) {
             if (this.ctxScatter) {
@@ -488,9 +574,7 @@ export class Map extends Component<MapProps, MapState, {}> {
                 this.bufferPaintScatters(renderingQueue);
             } else if (this.state.mode === "node") {
                 // 绘制结点
-                const list: Array<HilbertNode> = getHilbertLeaves(this.state.data, 10 + this.map.current.getZoom() * 2);
-                this.updated = true;
-                this.paintNodes(list);
+                this.paintNodes();
             }
         }
     }
@@ -498,22 +582,62 @@ export class Map extends Component<MapProps, MapState, {}> {
     /**
      * 绘制结点.
      *
-     * @param {Array<HilbertNode>} nodes 结点列表
+     * @protected
+     * @returns {void}
+     * @memberof Map
      */
-    protected paintNodes(nodes: Array<HilbertNode>): void {
+    protected paintNodes(): void {
         this.clearTimers();
 
         if (!this.ctxScatter) return;
 
-        const max: number = Math.max(...nodes.map(d => d.points.length / d.childrens));
+        if (isNaN(this.nodeR)) {
+            // 重置后，根据预测推荐一个半径参数
+            let box: Array<{ x: number; y: number; }> = [];
 
-        let r: number = this.map.current!.getZoom() / 3 + 3;
+            this.nodeR = this.map.current!.getZoom() / 3 + 3;
+                
+            this.nodes.forEach(node => {
+                const pos: {
+                    x: number;
+                    y: number;
+                } = this.map.current!.project(HilbertDecode(node.code));
 
-        let box: Array<{ x: number; y: number; }> = [];
+                box.push(pos);
+            });
 
-        const proj = (num: number) => Math.sqrt(num / max) * (r - 1) + 1;
+            box = box.sort((a, b) => a.y - b.y);
 
-        nodes.forEach(node => {
+            for (let i: number = 1; i < box.length; i++) {
+                if (box[i].y - box[i - 1].y < 1e-6) {
+                    continue;
+                }
+                this.nodeR = Math.min(
+                    this.nodeR,
+                    box[i].y - box[i - 1].y
+                );
+            }
+
+            box.sort((a, b) => a.x - b.x);
+
+            for (let i: number = 1; i < box.length; i++) {
+                if (box[i].x - box[i - 1].x < 1e-6) {
+                    continue;
+                }
+                this.nodeR = Math.min(
+                    this.nodeR,
+                    box[i].x - box[i - 1].x
+                );
+            }
+
+            this.nodeR = (this.nodeR - 0.5) * 0.8;
+
+            this.nodeMax = Math.max(...this.nodes.map(d => d.points.length / d.childrens));
+        }
+
+        const proj = (num: number) => Math.sqrt(num / this.nodeMax) * (this.nodeR - 1) + 1;
+        
+        this.nodes.forEach(node => {
             let s: number = 0;
 
             node.points.forEach(p => {
@@ -528,22 +652,27 @@ export class Map extends Component<MapProps, MapState, {}> {
             } = this.map.current!.project(HilbertDecode(node.code));
 
             if (
-                pos.x < 0 - r
-                || pos.x >= this.props.width + r
-                || pos.y < 0 - r
-                || pos.y >= this.props.height + r
+                pos.x < 0 - this.nodeR
+                || pos.x >= this.props.width + this.nodeR
+                || pos.y < 0 - this.nodeR
+                || pos.y >= this.props.height + this.nodeR
             ) {
                 return;
             }
 
-            box.push(pos);
+            const r: number = proj(node.points.length);
+
+            if (r >= 14) {
+                this.renderNode(node, pos.x, pos.y, r);
+                return;
+            }
 
             this.timers.push(
                 setTimeout(() => {
                     this.ctxScatter!.fillStyle = colorize(s);
                     this.ctxScatter!.beginPath();
                     this.ctxScatter!.arc(
-                        pos.x, pos.y, proj(node.points.length), 0, 2 * Math.PI
+                        pos.x, pos.y, r, 0, 2 * Math.PI
                     );
                     this.ctxScatter!.fill();
                     this.ctxScatter!.closePath();
@@ -553,32 +682,84 @@ export class Map extends Component<MapProps, MapState, {}> {
             );
         });
 
-        if (box.length > 1) {
-            box = box.sort((a, b) => a.y - b.y);
-            for (let i: number = 1; i < box.length; i++) {
-                if (box[i].y - box[i - 1].y < 1e-6) {
-                    continue;
-                }
-                r = Math.min(
-                    r,
-                    box[i].y - box[i - 1].y
-                );
-            }
-            box.sort((a, b) => a.x - b.x);
-            for (let i: number = 1; i < box.length; i++) {
-                if (box[i].x - box[i - 1].x < 1e-6) {
-                    continue;
-                }
-                r = Math.min(
-                    r,
-                    box[i].x - box[i - 1].x
-                );
-            }
-            r = (r - 0.5) * 0.8;
-        }
-
         this.progress.current?.start(this.timers.length);
     }
+
+    /**
+     * 展开绘制单个结点.
+     *
+     * @param {HilbertNode} node 目标展示结点
+     * @param {number} x x坐标
+     * @param {number} y y坐标
+     * @param {number} r 原始半径
+     * @protected
+     * @memberof Map
+     */
+    protected renderNode(node: HilbertNode, x: number, y: number, r: number): void {
+        /** 绘制图形的外边长 */
+        const a: number = Math.sqrt(Math.PI * r * r) * 1.21;
+        /** 绘制图形的外角半径 */
+        const br: number = 1 + Math.pow(a, 0.25);
+        /** 绘制图形的内边长 */
+        const b: number = a - br * 2;
+        
+        /** 柱形的数量 */
+        const nColumns: number = 4 + Math.min(Math.floor(a / 12) * 2, 12);
+        /** 单个柱形的宽度 */
+        const w: number = b / nColumns;
+
+        let box: Array<number> = new Array<number>(nColumns).fill(0);
+
+        node.points.forEach(p => {
+            const idx: number = Math.floor(p.value * nColumns);
+            box[idx] += 1 / node.points.length;
+        });
+
+        /** y 轴的最大值 */
+        const max: number = Math.min(1, Math.max(...box) * 1.25);
+        const fy = (val: number) => (b * val / max);
+
+        // 底部
+        this.ctxScatter!.strokeStyle = "rgb(17,17,17)";
+        this.ctxScatter!.fillStyle = "rgb(255,255,255)";
+        this.ctxScatter!.lineWidth = 1;
+        this.ctxScatter!.globalAlpha = 0.3;
+        this.ctxScatter!.beginPath();
+        this.ctxScatter!.moveTo(x - a / 2 + br, y - a / 2);
+        this.ctxScatter!.lineTo(x + a / 2 - br, y - a / 2);
+        this.ctxScatter!.arcTo(x + a / 2, y - a / 2, x + a / 2, y - a / 2 + br, br);
+        this.ctxScatter!.lineTo(x + a / 2, y + a / 2 - br);
+        this.ctxScatter!.arcTo(x + a / 2, y + a / 2, x + a / 2 - br, y + a / 2, br);
+        this.ctxScatter!.lineTo(x - a / 2 + br, y + a / 2);
+        this.ctxScatter!.arcTo(x - a / 2, y + a / 2, x - a / 2, y + a / 2 - br, br);
+        this.ctxScatter!.lineTo(x - a / 2, y - a / 2 + br);
+        this.ctxScatter!.arcTo(x - a / 2, y - a / 2, x - a / 2 + br, y - a / 2, br);
+        this.ctxScatter!.fill();
+        this.ctxScatter!.stroke();
+
+        // 内部
+        this.ctxScatter!.strokeStyle = "rgb(22,22,22)";
+        this.ctxScatter!.lineWidth = 1;
+        this.ctxScatter!.globalAlpha = 0.6;
+        this.ctxScatter!.beginPath();
+        this.ctxScatter!.moveTo(x - b / 2, y - b / 2);
+        this.ctxScatter!.lineTo(x + b / 2, y - b / 2);
+        this.ctxScatter!.lineTo(x + b / 2, y + b / 2);
+        this.ctxScatter!.lineTo(x - b / 2, y + b / 2);
+        this.ctxScatter!.closePath();
+        this.ctxScatter!.fill();
+        this.ctxScatter!.stroke();
+
+        // 条形
+        this.ctxScatter!.globalAlpha = 1;
+        this.ctxScatter!.strokeStyle = "rgb(34,34,34)";
+        box.forEach((col, i) => {
+            this.ctxScatter!.fillStyle = colorize(i / nColumns);
+            this.ctxScatter!.fillRect(x - b / 2 + w * i, y + b / 2 - fy(col), w, fy(col));
+            this.ctxScatter!.strokeRect(x - b / 2 + w * i, y + b / 2 - fy(col), w, fy(col));
+        });
+    }
+
 };
 
 type HilbertNode = {
