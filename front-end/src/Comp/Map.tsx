@@ -179,6 +179,32 @@ export class Map extends Component<MapProps, MapState, {}> {
                             }
                         }
                     } />
+                    <label key="prun" title="prun Hilbert tree" style={{
+                        display: "inline-block",
+                        width: "48px",
+                        height: "18px",
+                        padding: "3.5px 4px 1.5px",
+                        boxShadow: "2px 2px 2px #00000060",
+                        textAlign: "center",
+                        border: "1px solid #ddd",
+                        cursor: "pointer",
+                        opacity: this.state.mode === "node" ? 1 : 0.4
+                    }} onClick={
+                        () => {
+                            if (this.state.mode !== "node") {
+                                return;
+                            }
+                            if (this.map.current) {
+                                this.nodes = prun(geolist2tree(
+                                    this.state.data,
+                                    10 + this.map.current.getZoom() * 2
+                                ));
+                                this.repaint();
+                            }
+                        }
+                    } >
+                        { "prun" }
+                    </label>
                 </div>
                 <div key="mapbox-container" id={ this.props.id } style={{
                     display: "block",
@@ -771,6 +797,7 @@ type HilbertNode = {
 type HilbertTreeNode = BinaryTreeNode<{
     code: string;
     points?: Array<geodata>;
+    childrens?: number;
 }>;
 
 /**
@@ -842,6 +869,22 @@ const getNode = (data: Array<geodata>, code: string): Array<geodata> => {
 };
 
 /**
+ * 遍历一个结点下的子树.
+ *
+ * @param {HilbertTreeNode} root
+ * @param {((node: HilbertTreeNode) => (void | undefined))} callback
+ */
+const eachHilbertNodes = (root: HilbertTreeNode, callback: (node: HilbertTreeNode) => (void | undefined)): void => {
+    if (root.leftChild) {
+        eachHilbertNodes(root.leftChild, callback);
+    }
+    if (root.rightChild) {
+        eachHilbertNodes(root.rightChild, callback);
+    }
+    callback(root);
+};
+
+/**
  * 获取已经编码完成的数据的叶子结点集合.
  *
  * @param {Array<geodata>} data 数据列表
@@ -878,4 +921,158 @@ const getNode = (data: Array<geodata>, code: string): Array<geodata> => {
     }
 
     return list.map(d => d);
+};
+
+/**
+ * 对树结构进行剪枝.
+ *
+ * @param {HilbertTreeNode} tree 原始树结构
+ * @returns {Array<HilbertNode>}
+ */
+const prun = (tree: HilbertTreeNode): Array<HilbertNode> => {
+    let root: HilbertTreeNode = tree;
+
+    eachHilbertNodes(root, node => {
+        let temp: HilbertTreeNode | null = node.leftChild;
+        if (node.leftChild && !node.rightChild) {
+            // 只有左
+        } else if (!node.leftChild && node.rightChild) {
+            // 只有右
+            temp = node.rightChild;
+        } else {
+            if (!node.leftChild && !node.rightChild && node.data.points) {
+                // 重定位
+                let lng: number = 0;
+                let lat: number = 0;
+
+                node.data.points.forEach(p => {
+                    lng += p.lng;
+                    lat += p.lat;
+                });
+
+                lng /= node.data.points.length;
+                lat /= node.data.points.length;
+
+                node.data = {
+                    code: HilbertEncode(lng, lat, 16),
+                    points: node.data.points,
+                    childrens: node.data.childrens || 1
+                };
+            }
+
+            return;
+        }
+        if (temp && temp.data.points) {
+            // 收缩
+            let lng: number = 0;
+            let lat: number = 0;
+            let points: Array<geodata> = [];
+
+            temp.data.points.forEach(p => {
+                lng += p.lng;
+                lat += p.lat;
+                points.push(p);
+            });
+
+            lng /= points.length;
+            lat /= points.length;
+
+            node.data = {
+                code: HilbertEncode(lng, lat, 16),
+                points: points,
+                childrens: temp.data.childrens || 1
+            };
+            node.leftChild = null;
+            node.rightChild = null;
+        }
+    });
+
+    eachHilbertNodes(root, node => {
+        if (!node.parent) {
+            // 是根节点
+            return;
+        }
+        if (node.leftChild || node.rightChild) {
+            // 不是叶子节点
+            return;
+        }
+        let sibling: HilbertTreeNode | null = node.parent.rightChild;
+        if (node.parent.leftChild === node) {
+            // 作为左子节点
+            if (!node.parent.rightChild?.data.points) {
+                // 没有同胞结点或同胞结点不是叶子节点
+                return;
+            }
+        } else {
+            // 作为右子节点
+            if (!node.parent.leftChild?.data.points) {
+                // 没有同胞结点或同胞结点不是叶子节点
+                return;
+            } else {
+                sibling = node.parent.leftChild;
+            }
+        }
+        
+        let valueLeft: number = 0;
+        let valueRight: number = 0;
+
+        node.data.points!.forEach(p => {
+            valueLeft += p.value;
+        });
+        valueLeft /= node.data.points!.length;
+
+        sibling!.data.points!.forEach(p => {
+            valueRight += p.value;
+        });
+        valueRight /= sibling!.data.points!.length;
+
+        if (Math.abs(valueLeft - valueRight) < 0.1) {
+            let lng: number = 0;
+            let lat: number = 0;
+
+            node.data.points!.forEach(p => {
+                lat += p.lat;
+                lng += p.lng;
+            });
+            sibling!.data.points!.forEach(p => {
+                lat += p.lat;
+                lng += p.lng;
+            });
+
+            lng /= (
+                node.data.points!.length + sibling!.data.points!.length
+            );
+            lat /= (
+                node.data.points!.length + sibling!.data.points!.length
+            );
+
+            node.parent.data = {
+                code: HilbertEncode(lng, lat, 16),
+                points: node.data.points!.concat(
+                    sibling!.data.points!
+                ),
+                childrens: (node.data.childrens || 1) + (
+                    sibling!.data.childrens || 1
+                )
+            };
+            node.parent.leftChild = null;
+            node.parent.rightChild = null;
+        }
+    });
+
+    let list: Array<HilbertNode> = [];
+
+    eachHilbertNodes(root, node => {
+        if (node.leftChild || node.rightChild) {
+            return;
+        }
+
+        list.push({
+            code: node.data.code,
+            points: node.data.points!,
+            childrens: node.data.childrens || 1
+        });
+    });
+
+    return list;
 };
