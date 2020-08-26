@@ -111,7 +111,36 @@ export const HilbertDecode = (code: string): { lng: number; lat: number; } => {
     }
 
     return {
-        lng: lngRange[0],
-        lat: latRange[0]
+        lng: (lngRange[0] + lngRange[1]) / 2,
+        lat: (latRange[0] + latRange[1]) / 2
+    };
+};
+
+export const HilbertDecodeValidArea = (code: string): {
+    lng: [number, number];
+    lat: [number, number];
+} => {
+    let lngRange: [number, number] = [-180.0, 180.0];
+    let latRange: [number, number] = [-90.0, 90.0];
+
+    let curSquare: 'a' | 'b' | 'c' | 'd' = 'a';
+
+    for (let i: number = 0; i < code.length; i += 2) {
+        const lngMid: number = (lngRange[0] + lngRange[1]) / 2;
+        const latMid: number = (latRange[0] + latRange[1]) / 2;
+
+        const quadPos: 0 | 1 | 2 | 3 = parseInt(code.substr(i, 2), 2) as 0 | 1 | 2 | 3;
+        let quadX: 1 | 0 = 0;
+        let quadY: 1 | 0 = 0;
+
+        [quadX, quadY, curSquare] = HilbertMapReverse[curSquare][quadPos] as [1 | 0, 1 | 0, 'a' | 'b' | 'c' | 'd'];
+
+        lngRange[1 - quadX] = lngMid;
+        latRange[1 - quadY] = latMid;
+    }
+
+    return {
+        lng: lngRange,
+        lat: latRange
     };
 };

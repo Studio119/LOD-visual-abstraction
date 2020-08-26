@@ -13,7 +13,7 @@ import axios, { AxiosResponse } from "axios";
 import encodePath from "../Tools/pathEncoder";
 import Color from "../Design/Color";
 import { Progress } from "../Subcomp/Progress";
-import { HilbertEncode, HilbertDecode } from "../Tools/hilbertEncoder";
+import { HilbertEncode, HilbertDecode, HilbertDecodeValidArea } from "../Tools/hilbertEncoder";
 
 
 const colorize = (val: number) => {
@@ -218,6 +218,7 @@ export class Map extends Component<MapProps, MapState, {}> {
                     styleURL="mapbox://styles/ichen-antoine/cke5cvr811xb419mi5hd9otc3"
                     minZoom={ 1 } maxZoom={ 15 }
                     onBoundsChanged={ () => {
+                        this.nodeR = NaN;
                         this.repaint();
                     } } />
                 </div>
@@ -350,7 +351,10 @@ export class Map extends Component<MapProps, MapState, {}> {
         if (this.map.current) {
             this.nodeR = NaN;
             this.nodeMax = NaN;
-            this.nodes = getHilbertLeaves(this.state.data, 10 + this.map.current.getZoom() * 2);
+            this.nodes = getHilbertLeaves(
+                this.state.data,
+                Math.round(10 + this.map.current.getZoom() * 2)
+            );
             this.repaint();
         }
     }
@@ -375,7 +379,7 @@ export class Map extends Component<MapProps, MapState, {}> {
         const dl: Array<geodata> = data.map(d => {
             return {
                 ...d,
-                hilbertCode: HilbertEncode(d.lng, d.lat, 16)
+                hilbertCode: HilbertEncode(d.lng, d.lat, 20)
             };
         }).sort((a, b) => a.hilbertCode > b.hilbertCode ? 1 : -1);
 
@@ -452,7 +456,7 @@ export class Map extends Component<MapProps, MapState, {}> {
                         let curNode: HilbertNode = {
                             code: "",
                             points: [],
-                            childrens: 0
+                            childrens: []
                         };
 
                         let x: number = 0;
@@ -464,20 +468,19 @@ export class Map extends Component<MapProps, MapState, {}> {
                                 y += p.lat;
                             });
                             curNode.points.push(...d.points);
-                            curNode.childrens += d.childrens;
+                            curNode.childrens.push(...d.childrens);
                         });
 
                         x /= curNode.points.length;
                         y /= curNode.points.length;
 
-                        curNode.code = HilbertEncode(x, y, 16);
+                        curNode.code = HilbertEncode(x, y, 20);
 
                         this.nodes = [curNode, ...this.nodes];
         
                         this.ctxScatter!.clearRect(0, 0, this.props.width, this.props.height);
                         this.ctxSketch!.clearRect(0, 0, this.props.width, this.props.height);
                         // 绘制结点
-                        this.updated = true;
                         this.paintNodes();
                     }
                 }, 100);
@@ -512,8 +515,6 @@ export class Map extends Component<MapProps, MapState, {}> {
      * @memberof Map
      */
     protected bufferPaintScatters(list: Array<{x: number; y:number; val: number;}>, step: number = 100): void {
-        this.clearTimers();
-
         if (!this.ctxScatter) return;
 
         let piece: Array<{x: number; y:number; val: number;}> = [];
@@ -580,6 +581,7 @@ export class Map extends Component<MapProps, MapState, {}> {
         if (this.updated) {
             return;
         }
+        this.clearTimers();
         if (this.map.current) {
             if (!this.map.current!.ready()) {
                 this.updated = false;
@@ -613,9 +615,9 @@ export class Map extends Component<MapProps, MapState, {}> {
      * @memberof Map
      */
     protected paintNodes(): void {
-        this.clearTimers();
-
         if (!this.ctxScatter) return;
+
+        this.updated = true;
 
         if (isNaN(this.nodeR)) {
             // 重置后，根据预测推荐一个半径参数
@@ -658,7 +660,9 @@ export class Map extends Component<MapProps, MapState, {}> {
 
             this.nodeR = (this.nodeR - 0.5) * 0.8;
 
-            this.nodeMax = Math.max(...this.nodes.map(d => d.points.length / d.childrens));
+            this.nodeMax = Math.max(...this.nodes.map(
+                d => d.points.length / d.childrens.length
+            ));
         }
 
         const proj = (num: number) => Math.sqrt(num / this.nodeMax) * (this.nodeR - 1) + 1;
@@ -688,13 +692,35 @@ export class Map extends Component<MapProps, MapState, {}> {
 
             const r: number = proj(node.points.length);
 
-            if (r >= 14) {
+            if (r >= 16) {
                 this.renderNode(node, pos.x, pos.y, r);
                 return;
             }
+            
+            const range: {
+                lng: [number, number];
+                lat: [number, number];
+            } = HilbertDecodeValidArea(node.code);
+            const l1: { x: number; y: number; } = this.map.current!.project({
+                lng: range.lng[0],
+                lat: range.lat[0]
+            });
+            const l2: { x: number; y: number; } = this.map.current!.project({
+                lng: range.lng[1],
+                lat: range.lat[1]
+            });
 
             this.timers.push(
                 setTimeout(() => {
+                    this.ctxScatter!.strokeStyle = colorize(s);
+                    this.ctxScatter!.lineWidth = 1;
+                    this.ctxScatter!.strokeRect(
+                        Math.min(l1.x, l2.x),
+                        Math.min(l1.y, l2.y),
+                        Math.abs(l2.x - l1.x),
+                        Math.abs(l2.y - l1.y)
+                    );
+
                     this.ctxScatter!.fillStyle = colorize(s);
                     this.ctxScatter!.beginPath();
                     this.ctxScatter!.arc(
@@ -704,7 +730,7 @@ export class Map extends Component<MapProps, MapState, {}> {
                     this.ctxScatter!.closePath();
 
                     this.progress.current?.next();
-                }, 1 * this.timers.length + 20)
+                }, 0.02 * this.timers.length + 20)
             );
         });
 
@@ -723,7 +749,7 @@ export class Map extends Component<MapProps, MapState, {}> {
      */
     protected renderNode(node: HilbertNode, x: number, y: number, r: number): void {
         /** 绘制图形的外边长 */
-        const a: number = Math.sqrt(Math.PI * r * r) * 1.21;
+        const a: number = Math.sqrt(Math.PI * r * r);
         /** 绘制图形的外角半径 */
         const br: number = 1 + Math.pow(a, 0.25);
         /** 绘制图形的内边长 */
@@ -791,13 +817,19 @@ export class Map extends Component<MapProps, MapState, {}> {
 type HilbertNode = {
     code: string;
     points: Array<geodata>;
-    childrens: number;
+    childrens: Array<{
+        lng: [number, number];
+        lat: [number, number];
+    }>;
 };
 
 type HilbertTreeNode = BinaryTreeNode<{
     code: string;
     points?: Array<geodata>;
-    childrens?: number;
+    childrens?: Array<{
+        lng: [number, number];
+        lat: [number, number];
+    }>;
 }>;
 
 /**
@@ -900,12 +932,23 @@ const eachHilbertNodes = (root: HilbertTreeNode, callback: (node: HilbertTreeNod
             depth = data[0].hilbertCode.length;
         }
         
-        if (rootCode.length > depth) {
+        if (rootCode.length + 1 >= depth) {
             // 到达最大精度，绘制叶子节点
-            return [...list.map(d => d), {
+            const range: {
+                lng: [number, number];
+                lat: [number, number];
+            } = HilbertDecodeValidArea(rootCode);
+
+            range.lng.sort((a, b) => a - b);
+            range.lat.sort((a, b) => a - b);
+
+            return [{
                 code: rootCode,
                 points: data.map(d => d),
-                childrens: 1
+                childrens: [{
+                    lng: range.lng,
+                    lat: range.lat
+                }]
             }];
         }
         let leftPoints: Array<geodata> = getNode(data, rootCode + "0");
@@ -920,7 +963,25 @@ const eachHilbertNodes = (root: HilbertTreeNode, callback: (node: HilbertTreeNod
         }
     }
 
-    return list.map(d => d);
+    if (list.length) {
+        return list.map(d => d);
+    } else {
+        const range: {
+            lng: [number, number];
+            lat: [number, number];
+        } = HilbertDecodeValidArea(rootCode);
+        range.lng.sort((a, b) => a - b);
+        range.lat.sort((a, b) => a - b);
+
+        return [{
+            code: rootCode,
+            points: data.map(d => d),
+            childrens: [{
+                lng: range.lng,
+                lat: range.lat
+            }]
+        }];
+    }
 };
 
 /**
@@ -953,10 +1014,47 @@ const prun = (tree: HilbertTreeNode): Array<HilbertNode> => {
                 lng /= node.data.points.length;
                 lat /= node.data.points.length;
 
+                let childrens: Array<{
+                    lng: [number, number];
+                    lat: [number, number];
+                }> = [];
+
+                eachHilbertNodes(node, n => {
+                    if (!node.leftChild && !node.rightChild) {
+                        const range: {
+                            lng: [number, number];
+                            lat: [number, number];
+                        } = HilbertDecodeValidArea(n.data.code);
+            
+                        range.lng.sort((a, b) => a - b);
+                        range.lat.sort((a, b) => a - b);
+
+                        childrens.push({
+                            lng: range.lng,
+                            lat: range.lat
+                        });
+                    }
+                });
+
+                if (childrens.length === 0) {
+                    const range: {
+                        lng: [number, number];
+                        lat: [number, number];
+                    } = HilbertDecodeValidArea(node.data.code);
+        
+                    range.lng.sort((a, b) => a - b);
+                    range.lat.sort((a, b) => a - b);
+
+                    childrens.push({
+                        lng: range.lng,
+                        lat: range.lat
+                    });
+                }
+
                 node.data = {
-                    code: HilbertEncode(lng, lat, 16),
+                    code: HilbertEncode(lng, lat, 20),
                     points: node.data.points,
-                    childrens: node.data.childrens || 1
+                    childrens: childrens
                 };
             }
 
@@ -977,10 +1075,47 @@ const prun = (tree: HilbertTreeNode): Array<HilbertNode> => {
             lng /= points.length;
             lat /= points.length;
 
+            let childrens: Array<{
+                lng: [number, number];
+                lat: [number, number];
+            }> = [];
+
+            eachHilbertNodes(node, n => {
+                if (!node.leftChild && !node.rightChild) {
+                    const range: {
+                        lng: [number, number];
+                        lat: [number, number];
+                    } = HilbertDecodeValidArea(n.data.code);
+        
+                    range.lng.sort((a, b) => a - b);
+                    range.lat.sort((a, b) => a - b);
+
+                    childrens.push({
+                        lng: range.lng,
+                        lat: range.lat
+                    });
+                }
+            });
+
+            if (childrens.length === 0) {
+                const range: {
+                    lng: [number, number];
+                    lat: [number, number];
+                } = HilbertDecodeValidArea(node.data.code);
+    
+                range.lng.sort((a, b) => a - b);
+                range.lat.sort((a, b) => a - b);
+
+                childrens.push({
+                    lng: range.lng,
+                    lat: range.lat
+                });
+            }
+
             node.data = {
-                code: HilbertEncode(lng, lat, 16),
+                code: HilbertEncode(lng, lat, 20),
                 points: points,
-                childrens: temp.data.childrens || 1
+                childrens: childrens
             };
             node.leftChild = null;
             node.rightChild = null;
@@ -1026,7 +1161,7 @@ const prun = (tree: HilbertTreeNode): Array<HilbertNode> => {
         });
         valueRight /= sibling!.data.points!.length;
 
-        if (Math.abs(valueLeft - valueRight) < 0.1) {
+        if (Math.abs(valueLeft - valueRight) < 0.05) {
             let lng: number = 0;
             let lat: number = 0;
 
@@ -1047,13 +1182,11 @@ const prun = (tree: HilbertTreeNode): Array<HilbertNode> => {
             );
 
             node.parent.data = {
-                code: HilbertEncode(lng, lat, 16),
+                code: HilbertEncode(lng, lat, 20),
                 points: node.data.points!.concat(
                     sibling!.data.points!
                 ),
-                childrens: (node.data.childrens || 1) + (
-                    sibling!.data.childrens || 1
-                )
+                childrens: node.data.childrens!.concat(sibling!.data.childrens!)
             };
             node.parent.leftChild = null;
             node.parent.rightChild = null;
@@ -1066,6 +1199,8 @@ const prun = (tree: HilbertTreeNode): Array<HilbertNode> => {
         if (node.leftChild || node.rightChild) {
             return;
         }
+
+        if (node.data.childrens)
 
         list.push({
             code: node.data.code,
