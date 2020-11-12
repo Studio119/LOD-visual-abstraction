@@ -6,7 +6,7 @@
  */
 
 import React, { Component } from "react";
-import $ from "jquery";
+// import $ from "jquery";
 import MapBox from "../react-mapbox/MapBox";
 import { geodata, BinaryTreeNode } from "../types";
 import axios, { AxiosResponse } from "axios";
@@ -373,34 +373,37 @@ export class Map extends Component<MapProps, MapState, {}> {
     protected paintSuperpixel(): void {
         this.clearTimers();
         
-        let piece: Array<{x: number; y:number; val: number;}> = [];
+        // let piece: Array<{x: number; y:number; val: number;}> = [];
 
-        const paint = () => {
-            const pieceCopy: Array<{x: number; y:number; val: number;}> = piece.map(d => d);
-            this.timers.push(
-                setTimeout(() => {
-                    this.updated = true;
+        // const paint = () => {
+        //     const pieceCopy: Array<{x: number; y:number; val: number;}> = piece.map(d => d);
+        //     this.timers.push(
+        //         setTimeout(() => {
+        //             this.updated = true;
 
-                    pieceCopy.forEach(d => {
-                        this.ctxScatter!.fillStyle = colorize(d.val);
-                        this.ctxScatter!.beginPath();
-                        this.ctxScatter!.fillRect(d.x * 2, d.y * 2, 2, 2);
-                        this.ctxScatter!.fill();
-                        this.ctxScatter!.closePath();
-                    });
+        //             pieceCopy.forEach(d => {
+        //                 this.ctxScatter!.fillStyle = colorize(d.val);
+        //                 this.ctxScatter!.beginPath();
+        //                 this.ctxScatter!.fillRect(d.x * 2, d.y * 2, 2, 2);
+        //                 this.ctxScatter!.fill();
+        //                 this.ctxScatter!.closePath();
+        //             });
 
-                    this.progress.current?.next();
-                }, 1 * this.timers.length)
-            );
-            piece = [];
-        };
+        //             this.progress.current?.next();
+        //         }, 1 * this.timers.length)
+        //     );
+        //     piece = [];
+        // };
 
         let box: Array<Array<Array<number>>> = [];
+        let valBox: Array<Array<number>> = [];
         
         for (let y: number = 0; y < this.props.height / 2; y++) {
             box.push([]);
+            valBox.push([]);
             for (let x: number = 0; x < this.props.width / 2; x++) {
                 box[y].push([]);
+                valBox[y].push(0);
             }
         }
 
@@ -412,7 +415,7 @@ export class Map extends Component<MapProps, MapState, {}> {
                 x: Math.round(pos.x / 2),
                 y: Math.round(pos.y / 2)
             };
-            if (pos.x < 0 || pos.x >= this.props.width /2 || pos.y < 0 || pos.y >= this.props.height / 2) {
+            if (pos.x < 0 || pos.x >= this.props.width / 2 || pos.y < 0 || pos.y >= this.props.height / 2) {
                 return;
             }
             box[pos.y][pos.x].push(d.value);
@@ -425,23 +428,68 @@ export class Map extends Component<MapProps, MapState, {}> {
                 if (box2[y][x].length > 0) {
                     let val: number = 0;
                     box2[y][x].forEach(d => val += d);
-                    val /= box2[y][x].length;
-                    piece.push({ x, y, val });
-                    if (piece.length === 100) {
-                        paint();
-                    }
+                    valBox[y][x] = val / box2[y][x].length;
                 }
             }
         }
 
-        if (piece.length) {
-            paint();
-        }
+        // for (let y: number = 0; y < this.props.height / 2; y++) {
+        //     for (let x: number = 0; x < this.props.width / 2; x++) {
+        //         const val = valBox[y][x];
+        //         if (val > 0) {
+        //             piece.push({ x, y, val });
+        //             if (piece.length === 100) {
+        //                 paint();
+        //             }
+        //         }
+        //     }
+        // }
+
+        // if (piece.length) {
+        //     paint();
+        // }
+
+        const superPixels = this.getSuperPixel(valBox, 6);
+
+        SuperPixel.grow();
+
+        superPixels.forEach(sp => {
+            this.timers.push(
+                setTimeout(() => {
+                    // this.ctxScatter!.strokeStyle = "rgb(249,95,24)";
+                    this.ctxScatter!.strokeStyle = "rgba(0,0,0,0.5)";
+                    this.ctxScatter!.lineWidth = 1;
+                    this.ctxScatter!.fillStyle = colorize(sp.value);
+
+                    sp.children.forEach(child => {
+                        this.ctxScatter!.fillRect(
+                            child[0] * 2, child[1] * 2, 2, 2
+                        );
+                    });
+                    
+                    // sp.getBorders().forEach(line => {
+                    //     this.ctxScatter!.beginPath();
+                    //     this.ctxScatter!.moveTo(
+                    //         Math.round(line.x1 / 2) * 2 + 1, 
+                    //         Math.round(line.y1 / 2) * 2 + 1
+                    //     );
+                    //     this.ctxScatter!.lineTo(
+                    //         Math.round(line.x2 / 2) * 2 + 1, 
+                    //         Math.round(line.y2 / 2) * 2 + 1
+                    //     );
+                    //     this.ctxScatter!.stroke();
+                    //     this.ctxScatter!.closePath();
+                    // });
+
+                    this.progress.current!.next();
+                }, 1 * this.timers.length)
+            );
+        });
 
         this.progress.current?.start(this.timers.length);
     }
 
-    protected spread(box: number[][][]): number[][][] {
+    protected spread(box: number[][][], radius: number = 9): number[][][] {
         let box2: Array<Array<Array<number>>> = [];
         
         for (let y: number = 0; y < this.props.height; y++) {
@@ -450,44 +498,53 @@ export class Map extends Component<MapProps, MapState, {}> {
                 box2[y].push([]);
             }
         }
+        
+        let core: number[][] = [];
+        let sumW: number = 0;
 
-        const core = [
-            [0.095, 0.118, 0.095],
-            [0.118, 0.148, 0.118],
-            [0.095, 0.118, 0.095]
-        ];
-
-        // const core = [
-        //     [0.066, 0.078, 0.085, 0.078, 0.066],
-        //     [0.078, 0.095, 0.118, 0.095, 0.078],
-        //     [0.085, 0.118, 0.148, 0.118, 0.085],
-        //     [0.078, 0.095, 0.118, 0.095, 0.078],
-        //     [0.066, 0.078, 0.085, 0.078, 0.066]
-        // ];
-
-        // const core = [
-        //     [0.017, 0.017, 0.017, 0.017, 0.017, 0.017, 0.017, 0.017, 0.017],
-        //     [0.017, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.017],
-        //     [0.017, 0.022, 0.066, 0.078, 0.085, 0.078, 0.066, 0.022, 0.017],
-        //     [0.017, 0.022, 0.078, 0.095, 0.118, 0.095, 0.078, 0.022, 0.017],
-        //     [0.017, 0.022, 0.085, 0.118, 0.148, 0.118, 0.085, 0.022, 0.017],
-        //     [0.017, 0.022, 0.078, 0.095, 0.118, 0.095, 0.078, 0.022, 0.017],
-        //     [0.017, 0.022, 0.066, 0.078, 0.085, 0.078, 0.066, 0.022, 0.017],
-        //     [0.017, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.017],
-        //     [0.017, 0.017, 0.017, 0.017, 0.017, 0.017, 0.017, 0.017, 0.017]
-        // ];
+        for (let y: number = 0; y < radius * 2 + 1; y++) {
+            core.push([]);
+            for (let x: number = 0; x < radius * 2 + 1; x++) {
+                const weight = 1 / Math.sqrt(
+                    (Math.pow(y - radius, 2) + Math.pow(x - radius, 2)) || Infinity
+                );
+                sumW += weight;
+                core[y].push(weight);
+            }
+        }
+        
+        for (let y: number = 0; y < radius * 2 + 1; y++) {
+            for (let x: number = 0; x < radius * 2 + 1; x++) {
+                core[y][x] /= sumW;
+            }
+        }
 
         for (let y: number = 0; y < this.props.height; y++) {
             for (let x: number = 0; x < this.props.width; x++) {
+                try {
+                    if (box[y][x].length) {
+                        let value: number = 0;
+                        box[y][x].forEach(d => {
+                            value += d;
+                        });
+                        box2[y][x] = [value / box[y][x].length];
+                        continue;
+                    }
+                } catch {
+                    break;
+                }
                 let value: number = 0;
                 let weights: number = 0;
-                for (let dy: number = 0; dy < 3; dy++) {
-                    for (let dx: number = 0; dx < 3; dx++) {
-                        const oy: number = y - 1 + dy;
+                for (let dy: number = 0; dy < radius * 2 + 1; dy++) {
+                    for (let dx: number = 0; dx < radius * 2 + 1; dx++) {
+                        if (Math.pow(dy - radius, 2) + Math.pow(dx - radius, 2) > Math.pow(radius, 2)) {
+                            continue;
+                        }
+                        const oy: number = y - radius + dy;
                         if (oy < 0 || oy >= this.props.height / 2) {
                             continue;
                         }
-                        const ox: number = x - 1 + dx;
+                        const ox: number = x - radius + dx;
                         if (ox < 0 || ox >= this.props.width / 2) {
                             continue;
                         }
@@ -506,6 +563,24 @@ export class Map extends Component<MapProps, MapState, {}> {
         }
 
         return box2;
+    }
+
+    protected getSuperPixel(box: Array<Array<number>>, r: number = 8): Array<SuperPixel> {
+        SuperPixel.loadArea(box);
+
+        let list: Array<SuperPixel> = [];
+
+        for (let y: number = Math.round(r / 4); y < this.props.height / 2; y += r) {
+            for (let x: number = Math.round(r / 4); x < this.props.width / 2; x += r) {
+                if (box[y][x] > 0) {
+                    list.push(
+                        new SuperPixel(x, y)
+                    );
+                }
+            }
+        }
+
+        return list;
     }
 
     /**
@@ -644,6 +719,163 @@ export class Map extends Component<MapProps, MapState, {}> {
 
 };
 
+export class SuperPixel {
+
+    protected static area: { val: number; allocated: boolean; }[][] = [];
+    protected static countReady: number = 0;
+    protected static sps: SuperPixel[] = [];
+
+    protected _children: Array<[number, number, number]>;
+
+    public constructor(x: number, y: number) {
+        this._children = [[x, y, SuperPixel.area[y][x].val]];
+        SuperPixel.area[y][x].allocated = true;
+        SuperPixel.countReady --;
+        SuperPixel.sps.push(this);
+    }
+
+    public static loadArea(area: number[][]): void {
+        SuperPixel.countReady = 0;
+        SuperPixel.area = area.map(row => {
+            return row.map(d => {
+                if (d > 0) {
+                    SuperPixel.countReady ++;
+                }
+                return {
+                    val: d,
+                    allocated: false
+                };
+            });
+        });
+        SuperPixel.sps = [];
+    }
+
+    public static grow(): void {
+        while (SuperPixel.countReady) {
+            SuperPixel.sps.forEach(sp => {
+                sp.grow();
+            });
+        }
+    }
+
+    public get children() {
+        return this._children;
+    }
+
+    public getBorders(): { x1: number; y1: number; x2: number; y2: number; }[] {
+        let borders: { x1: number; y1: number; x2: number; y2: number; }[] = [];
+        let border: { [id: string]: { x1: number; y1: number; x2: number; y2: number; }; } = {};
+
+        this.children.forEach(child => {
+            const lines = [{
+                x1: child[0] * 2 - 1,
+                y1: child[1] * 2 - 1,
+                x2: child[0] * 2 + 1,
+                y2: child[1] * 2 - 1
+            }, {
+                x1: child[0] * 2 + 1,
+                y1: child[1] * 2 - 1,
+                x2: child[0] * 2 + 1,
+                y2: child[1] * 2 + 1
+            }, {
+                x1: child[0] * 2 - 1,
+                y1: child[1] * 2 + 1,
+                x2: child[0] * 2 + 1,
+                y2: child[1] * 2 + 1
+            }, {
+                x1: child[0] * 2 - 1,
+                y1: child[1] * 2 - 1,
+                x2: child[0] * 2 - 1,
+                y2: child[1] * 2 + 1
+            }];
+
+            lines.forEach(line => {
+                const id: string = `${ line.x1 }:${ line.y1 }:${ line.x2 }:${ line.y2 }`;
+                if (border[id]) {
+                    delete border[id];
+                } else {
+                    border[id] = line;
+                }
+            });
+        });
+
+        for (const id in border) {
+            if (border.hasOwnProperty(id)) {
+                borders.push(border[id]);
+            }
+        }
+
+        return borders;
+    }
+
+    public get value() {
+        let aver: number = 0;
+        this.children.forEach(child => {
+            aver += child[2];
+        });
+        aver /= this.children.length;
+
+        return aver;
+    }
+
+    protected grow(): boolean {
+        const differ = (val: number, x: number, y: number) => {
+            return Math.abs(val - this.value) + Math.sqrt(
+                Math.pow(
+                    x - this.children[0][0], 2
+                ) + Math.pow(
+                    y - this.children[0][1], 2
+                )
+            ) / 600;
+        };
+
+        let minDif: number = Infinity;
+        let target: [number, number] | null = null;
+
+        this._children.forEach(child => {
+            // const biases = [
+            //     [-1, -1], [0, -1], [1, -1],
+            //     [-1, 0], [1, 0],
+            //     [-1, 1], [0, 1], [1, 1]
+            // ];
+            const biases = [
+                [0, -1], [-1, 0], [1, 0], [0, 1]
+            ];
+
+            for (let i: number = 0; i < biases.length; i++) {
+                const pos: [number, number] = [child[0] + biases[i][0], child[1] + biases[i][1]];
+                if (!(SuperPixel.area[pos[1]] && SuperPixel.area[pos[1]][pos[0]])) {
+                    continue;
+                }
+                if (SuperPixel.area.length > pos[1] && SuperPixel.area[0].length > pos[0]) {
+                    const val: number = SuperPixel.area[pos[1]][pos[0]].val;
+                    if (val <= 0) {
+                        continue;
+                    }
+                    if (!SuperPixel.area[pos[1]][pos[0]].allocated) {
+                        const dif = differ(val, pos[0], pos[1]);
+                        if (dif < minDif) {
+                            minDif = dif;
+                            target = pos;
+                        }
+                    }
+                }
+            }
+        });
+        
+        if (target) {
+            SuperPixel.area[target[1]][target[0]].allocated = true;
+            SuperPixel.countReady --;
+            this._children.push([
+                target[0], target[1], SuperPixel.area[target[1]][target[0]].val
+            ]);
+        }
+
+        return target || false;
+    }
+
+};
+
 type HilbertNode = {
     code: string;
     points: Array<geodata>;
@@ -730,7 +962,7 @@ const getNode = (data: Array<geodata>, code: string): Array<geodata> => {
  * @param {HilbertTreeNode} root
  * @param {((node: HilbertTreeNode) => (void | undefined))} callback
  */
-const eachHilbertNodes = (root: HilbertTreeNode, callback: (node: HilbertTreeNode) => (void | undefined)): void => {
+export const eachHilbertNodes = (root: HilbertTreeNode, callback: (node: HilbertTreeNode) => (void | undefined)): void => {
     if (root.leftChild) {
         eachHilbertNodes(root.leftChild, callback);
     }
@@ -818,7 +1050,7 @@ const eachHilbertNodes = (root: HilbertTreeNode, callback: (node: HilbertTreeNod
  * @param {number} count 数量
  * @returns {Array<geodata>}
  */
-const getNeighbors = (total: Array<geodata>, idx: number, count: number): Array<geodata> => {
+export const getNeighbors = (total: Array<geodata>, idx: number, count: number): Array<geodata> => {
     let list: Array<geodata & { dist: number; }> = [];
 
     const code: string = total[idx].hilbertCode;
