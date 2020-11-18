@@ -18,7 +18,9 @@ import { debounced } from "../Tools/decorator";
 
 
 const colorize = (val: number) => {
-    return Color.toRgb(`hsl(${ 120 + Math.floor(Math.pow(val, 0.7) * 240) },1,0.5)`)
+    return Color.toRgb(`hsl(${
+        120 + Math.floor(Math.pow(val, 0.7) * 240)
+    },1,0.5)`);
 };
 
 export interface MapProps {
@@ -411,9 +413,10 @@ export class Map extends Component<MapProps, MapState, {}> {
             }
         }
 
-        const superPixels = this.getSuperPixel(valBox, 6);
+        const superPixels = this.getSuperPixel(valBox, 8);
 
         SuperPixel.grow();
+        // SuperPixel.normalize();
         
         superPixels.forEach(sp => {
             this.timers.push(
@@ -422,9 +425,9 @@ export class Map extends Component<MapProps, MapState, {}> {
                     this.ctxScatter!.strokeStyle = "rgba(0,0,0,0.5)";
                     this.ctxScatter!.lineWidth = 1;
                     this.ctxScatter!.fillStyle = colorize(sp.value);
+                    // this.ctxScatter!.fillStyle = colorize(SuperPixel.values[i]);
                     
                     sp.children.forEach(child => {
-                        this.ctxScatter!.fillStyle = "rgb(255,137,82)";
                         this.ctxScatter!.fillRect(
                             child[0] * 2, child[1] * 2, 2, 2
                         );
@@ -433,12 +436,12 @@ export class Map extends Component<MapProps, MapState, {}> {
                     sp.getBorders().forEach(line => {
                         this.ctxScatter!.beginPath();
                         this.ctxScatter!.moveTo(
-                            Math.round(line.x1 / 2) * 2 + 1, 
-                            Math.round(line.y1 / 2) * 2 + 1
+                            Math.round(line.x1 / 2) * 2, 
+                            Math.round(line.y1 / 2) * 2
                         );
                         this.ctxScatter!.lineTo(
-                            Math.round(line.x2 / 2) * 2 + 1, 
-                            Math.round(line.y2 / 2) * 2 + 1
+                            Math.round(line.x2 / 2) * 2, 
+                            Math.round(line.y2 / 2) * 2
                         );
                         this.ctxScatter!.stroke();
                         this.ctxScatter!.closePath();
@@ -498,7 +501,7 @@ export class Map extends Component<MapProps, MapState, {}> {
                 }
                 let value: number = 0;
                 let weights: number = 0;
-                let count: number = 0;
+                // let count: number = 0;
                 for (let dy: number = 0; dy < radius * 2 + 1; dy++) {
                     for (let dx: number = 0; dx < radius * 2 + 1; dx++) {
                         if (Math.pow(dy - radius, 2) + Math.pow(dx - radius, 2) > Math.pow(radius, 2)) {
@@ -516,7 +519,7 @@ export class Map extends Component<MapProps, MapState, {}> {
                             box[oy][ox].forEach(d => {
                                 value += d * core[dy][dx];
                                 weights += core[dy][dx];
-                                count++;
+                                // count++;
                             });
                         }
                     }
@@ -689,6 +692,7 @@ export class SuperPixel {
     protected static area: { val: number; allocated: boolean; }[][] = [];
     protected static countReady: number = 0;
     protected static sps: SuperPixel[] = [];
+    public static values: number[] = [];
 
     protected _children: Array<[number, number, number]>;
 
@@ -725,6 +729,29 @@ export class SuperPixel {
 
     public get children() {
         return this._children;
+    }
+
+    public static normalize() {
+        SuperPixel.values = [];
+        let temp: number = 0;
+        SuperPixel.sps.forEach(sp => {
+            SuperPixel.values.push(sp.value);
+            temp += sp.value;
+        });
+        const mean = temp / SuperPixel.sps.length;
+        temp = 0;
+        SuperPixel.sps.forEach(sp => {
+            temp += Math.pow(sp.value - mean, 2);
+        });
+        const std = Math.sqrt(temp / SuperPixel.sps.length);
+        SuperPixel.sps.forEach(sp => {
+            SuperPixel.values.push(
+                Math.max(0, Math.min(
+                    (sp.value - mean) / std,
+                    1
+                ))
+            );
+        });
     }
 
     public getBorders(): { x1: number; y1: number; x2: number; y2: number; }[] {
