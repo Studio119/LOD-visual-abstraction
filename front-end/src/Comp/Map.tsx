@@ -372,28 +372,6 @@ export class Map extends Component<MapProps, MapState, {}> {
      */
     protected paintSuperpixel(): void {
         this.clearTimers();
-        
-        // let piece: Array<{x: number; y:number; val: number;}> = [];
-
-        // const paint = () => {
-        //     const pieceCopy: Array<{x: number; y:number; val: number;}> = piece.map(d => d);
-        //     this.timers.push(
-        //         setTimeout(() => {
-        //             this.updated = true;
-
-        //             pieceCopy.forEach(d => {
-        //                 this.ctxScatter!.fillStyle = colorize(d.val);
-        //                 this.ctxScatter!.beginPath();
-        //                 this.ctxScatter!.fillRect(d.x * 2, d.y * 2, 2, 2);
-        //                 this.ctxScatter!.fill();
-        //                 this.ctxScatter!.closePath();
-        //             });
-
-        //             this.progress.current?.next();
-        //         }, 1 * this.timers.length)
-        //     );
-        //     piece = [];
-        // };
 
         let box: Array<Array<Array<number>>> = [];
         let valBox: Array<Array<number>> = [];
@@ -433,26 +411,10 @@ export class Map extends Component<MapProps, MapState, {}> {
             }
         }
 
-        // for (let y: number = 0; y < this.props.height / 2; y++) {
-        //     for (let x: number = 0; x < this.props.width / 2; x++) {
-        //         const val = valBox[y][x];
-        //         if (val > 0) {
-        //             piece.push({ x, y, val });
-        //             if (piece.length === 100) {
-        //                 paint();
-        //             }
-        //         }
-        //     }
-        // }
-
-        // if (piece.length) {
-        //     paint();
-        // }
-
         const superPixels = this.getSuperPixel(valBox, 6);
 
         SuperPixel.grow();
-
+        
         superPixels.forEach(sp => {
             this.timers.push(
                 setTimeout(() => {
@@ -460,26 +422,27 @@ export class Map extends Component<MapProps, MapState, {}> {
                     this.ctxScatter!.strokeStyle = "rgba(0,0,0,0.5)";
                     this.ctxScatter!.lineWidth = 1;
                     this.ctxScatter!.fillStyle = colorize(sp.value);
-
+                    
                     sp.children.forEach(child => {
+                        this.ctxScatter!.fillStyle = "rgb(255,137,82)";
                         this.ctxScatter!.fillRect(
                             child[0] * 2, child[1] * 2, 2, 2
                         );
                     });
-                    
-                    // sp.getBorders().forEach(line => {
-                    //     this.ctxScatter!.beginPath();
-                    //     this.ctxScatter!.moveTo(
-                    //         Math.round(line.x1 / 2) * 2 + 1, 
-                    //         Math.round(line.y1 / 2) * 2 + 1
-                    //     );
-                    //     this.ctxScatter!.lineTo(
-                    //         Math.round(line.x2 / 2) * 2 + 1, 
-                    //         Math.round(line.y2 / 2) * 2 + 1
-                    //     );
-                    //     this.ctxScatter!.stroke();
-                    //     this.ctxScatter!.closePath();
-                    // });
+                        
+                    sp.getBorders().forEach(line => {
+                        this.ctxScatter!.beginPath();
+                        this.ctxScatter!.moveTo(
+                            Math.round(line.x1 / 2) * 2 + 1, 
+                            Math.round(line.y1 / 2) * 2 + 1
+                        );
+                        this.ctxScatter!.lineTo(
+                            Math.round(line.x2 / 2) * 2 + 1, 
+                            Math.round(line.y2 / 2) * 2 + 1
+                        );
+                        this.ctxScatter!.stroke();
+                        this.ctxScatter!.closePath();
+                    });
 
                     this.progress.current!.next();
                 }, 1 * this.timers.length)
@@ -535,6 +498,7 @@ export class Map extends Component<MapProps, MapState, {}> {
                 }
                 let value: number = 0;
                 let weights: number = 0;
+                let count: number = 0;
                 for (let dy: number = 0; dy < radius * 2 + 1; dy++) {
                     for (let dx: number = 0; dx < radius * 2 + 1; dx++) {
                         if (Math.pow(dy - radius, 2) + Math.pow(dx - radius, 2) > Math.pow(radius, 2)) {
@@ -552,6 +516,7 @@ export class Map extends Component<MapProps, MapState, {}> {
                             box[oy][ox].forEach(d => {
                                 value += d * core[dy][dx];
                                 weights += core[dy][dx];
+                                count++;
                             });
                         }
                     }
