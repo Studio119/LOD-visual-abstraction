@@ -413,16 +413,21 @@ export class Map extends Component<MapProps, MapState, {}> {
             }
         }
 
-        const superPixels = this.getSuperPixel(valBox, 8);
+        this.getSuperPixel(valBox, 12);
 
         SuperPixel.grow();
+        SuperPixel.regrow();
+        SuperPixel.regrow();
+        SuperPixel.regrow();
+        SuperPixel.regrow();
+        SuperPixel.regrow();
         // SuperPixel.normalize();
         
-        superPixels.forEach(sp => {
+        SuperPixel.list.forEach(sp => {
             this.timers.push(
                 setTimeout(() => {
                     // this.ctxScatter!.strokeStyle = "rgb(249,95,24)";
-                    this.ctxScatter!.strokeStyle = "rgba(0,0,0,0.5)";
+                    this.ctxScatter!.strokeStyle = "rgba(0,0,0,0.2)";
                     this.ctxScatter!.lineWidth = 1;
                     this.ctxScatter!.fillStyle = colorize(sp.value);
                     // this.ctxScatter!.fillStyle = colorize(SuperPixel.values[i]);
@@ -500,7 +505,9 @@ export class Map extends Component<MapProps, MapState, {}> {
                     break;
                 }
                 let value: number = 0;
+                const updateValue = (val: number) => value += val;
                 let weights: number = 0;
+                const updateWeights = (w: number) => weights += w;
                 // let count: number = 0;
                 for (let dy: number = 0; dy < radius * 2 + 1; dy++) {
                     for (let dx: number = 0; dx < radius * 2 + 1; dx++) {
@@ -517,8 +524,10 @@ export class Map extends Component<MapProps, MapState, {}> {
                         }
                         if (box[oy][ox].length > 0) {
                             box[oy][ox].forEach(d => {
-                                value += d * core[dy][dx];
-                                weights += core[dy][dx];
+                                updateValue(d * core[dy][dx]);
+                                updateWeights(core[dy][dx]);
+                                // value += d * core[dy][dx];
+                                // weights += core[dy][dx];
                                 // count++;
                             });
                         }
@@ -692,12 +701,17 @@ export class SuperPixel {
     protected static area: { val: number; allocated: boolean; }[][] = [];
     protected static countReady: number = 0;
     protected static sps: SuperPixel[] = [];
+    public static get list() { return SuperPixel.sps; }
     public static values: number[] = [];
 
     protected _children: Array<[number, number, number]>;
+    protected active: boolean;
+
+    public static ALPHA: number = 0.3;
 
     public constructor(x: number, y: number) {
         this._children = [[x, y, SuperPixel.area[y][x].val]];
+        this.active = true;
         SuperPixel.area[y][x].allocated = true;
         SuperPixel.countReady --;
         SuperPixel.sps.push(this);
@@ -719,12 +733,85 @@ export class SuperPixel {
         SuperPixel.sps = [];
     }
 
-    public static grow(): void {
+    public static grow(threshold: number = 0.15): void {
+        // const total = SuperPixel.countReady;
+        // let added: number = 0;
+        // console.clear();
+        console.time("SuperPixel.grow took   ");
         while (SuperPixel.countReady) {
+            let flag: boolean = false;
             SuperPixel.sps.forEach(sp => {
-                sp.grow();
+                if (sp.active) {
+                    const res = sp.grow(threshold);
+                    flag = flag || res;
+                }
             });
+            if (!flag) {
+                if (SuperPixel.countReady) {
+                    const ready = SuperPixel.area.map((row, y) => {
+                        return row.map((d, x) => {
+                            return {
+                                x, y, ...d
+                            };
+                        });
+                    }).flat(1).filter(d => d.val > 0 && !d.allocated);
+                    if (ready.length === 0) {
+                        console.error("countReady not exact: ", this.countReady);
+                        break;
+                    }
+                    const formedReady = ready;
+                    // const formedReady = ready.map((d, i) => {
+                    //     let val: number = 0;
+                    //     ready.forEach((r, j) => {
+                    //         if (i === j) {
+                    //             return;
+                    //         }
+                    //         val += 1 / (Math.abs(d.x - r.x) + Math.abs(d.y - r.y) + 1);
+                    //     });
+                    //     return {
+                    //         ...d,
+                    //         w: val
+                    //     };
+                    // }).sort((a, b) => b.w - a.w);
+                    new SuperPixel(formedReady[0].x, formedReady[0].y);
+                    // added += 1;
+                } else {
+                    break;
+                }
+            }
+            // console.log(
+            //     `allocated pixels:        ${
+            //         (total - SuperPixel.countReady)
+            //     }/${ total }(${
+            //         SuperPixel.countReady
+            //     } left)\ngenerated superpixels:   ${
+            //         SuperPixel.sps.length
+            //     }(+${ added })`
+            // );
         }
+        console.timeEnd("SuperPixel.grow took   ");
+    }
+
+    public static regrow(threshold?: number): void {
+        SuperPixel.countReady = 0 - SuperPixel.sps.length;
+        SuperPixel.area = SuperPixel.area.map(row => {
+            return row.map(d => {
+                if (d.val > 0) {
+                    SuperPixel.countReady ++;
+                }
+                return {
+                    val: d.val,
+                    allocated: false
+                };
+            });
+        });
+        SuperPixel.sps.forEach(sp => {
+            const seed = sp._children[0];
+            sp._children = [seed];
+            sp.active = true;
+            SuperPixel.area[seed[1]][seed[0]].allocated = true;
+        });
+        SuperPixel.grow(threshold);
     }
 
     public get children() {
@@ -810,26 +897,29 @@ export class SuperPixel {
         return aver;
     }
 
-    protected grow(): boolean {
+    protected grow(threshold: number): boolean {
+        if (!this.active) {
+            return false;
+        }
+
+        const maxDist = Math.sqrt(
+            Math.pow(SuperPixel.area.length, 2) + Math.pow(SuperPixel.area[0].length, 2)
+        );
+
         const differ = (val: number, x: number, y: number) => {
-            return Math.abs(val - this.value) + Math.sqrt(
+            return Math.abs(val - this.value) * SuperPixel.ALPHA + Math.sqrt(
                 Math.pow(
                     x - this.children[0][0], 2
                 ) + Math.pow(
                     y - this.children[0][1], 2
                 )
-            ) / 600;
+            ) / maxDist * (1 - SuperPixel.ALPHA);
         };
 
         let minDif: number = Infinity;
         let target: [number, number] | null = null;
 
         this._children.forEach(child => {
-            // const biases = [
-            //     [-1, -1], [0, -1], [1, -1],
-            //     [-1, 0], [1, 0],
-            //     [-1, 1], [0, 1], [1, 1]
-            // ];
             const biases = [
                 [0, -1], [-1, 0], [1, 0], [0, 1]
             ];
@@ -845,10 +935,12 @@ export class SuperPixel {
                         continue;
                     }
                     if (!SuperPixel.area[pos[1]][pos[0]].allocated) {
-                        const dif = differ(val, pos[0], pos[1]);
-                        if (dif < minDif) {
-                            minDif = dif;
-                            target = pos;
+                        if (Math.abs(val - this.value) < threshold) {
+                            const dif = differ(val, pos[0], pos[1]);
+                            if (dif < minDif) {
+                                minDif = dif;
+                                target = pos;
+                            }
                         }
                     }
                 }
@@ -861,9 +953,11 @@ export class SuperPixel {
             this._children.push([
                 target[0], target[1], SuperPixel.area[target[1]][target[0]].val
             ]);
+        } else {
+            this.active = false;
         }
 
-        return target || false;
+        return target ? true : false;
     }
 
 };
